@@ -40,26 +40,40 @@ module Tire
           else
             return [] if hits.empty?
 
-            type  = @response['hits']['hits'].first['_type']
-            raise NoMethodError, "You have tried to eager load the model instances, " +
-                                 "but Tire cannot find the model class because " +
-                                 "document has no _type property." unless type
+            ordered_ids = []
+            records = []
 
-            begin
-              klass = type.camelize.constantize
-            rescue NameError => e
-              raise NameError, "You have tried to eager load the model instances, but " +
-                               "Tire cannot find the model class '#{type.camelize}' " +
-                               "based on _type '#{type}'.", e.backtrace
+            summary = @response['hits']['hits'].inject({}) do |summary, h|
+              ordered_ids << [h['_id'], h['_type']]
+              summary[h['_type']] ||= []
+              summary[h['_type']] << h['_id']
+              summary
             end
 
-            ids   = @response['hits']['hits'].map { |h| h['_id'] }
-            records =  @options[:load] === true ? klass.find(ids) : klass.find(ids, @options[:load])
+            summary.each do |type, ids|
+              klass = constantize_type(type)
+              records += @options[:load] === true ? klass.find(ids) : klass.find(ids, @options[:load])
+            end
 
             # Reorder records to preserve order from search results
-            ids.map { |id| records.detect { |record| record.id.to_s == id.to_s } }
+            ordered_ids.map { |id| records.detect { |record| record.id.to_s == id[0].to_s && record.class == constantize_type(id[1])} }
           end
         end
+
+      end
+
+      def constantize_type(type)
+        raise NoMethodError, "You have tried to eager load the model instances, " +
+                             "but Tire cannot find the model class because " +
+                             "document has no _type property." unless type
+        begin
+          klass = type.camelize.constantize
+        rescue NameError => e
+          raise NameError, "You have tried to eager load the model instances, but " +
+                           "Tire cannot find the model class '#{type.camelize}' " +
+                           "based on _type '#{type}'.", e.backtrace
+        end
+        klass
       end
 
       def each(&block)
